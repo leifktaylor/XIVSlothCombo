@@ -1,24 +1,17 @@
 using Dalamud.Interface.ManagedFontAtlas;
-using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Utility;
 using ECommons.DalamudServices;
 using ECommons.ImGuiMethods;
-using FFXIVClientStructs.FFXIV.Client.UI;
-using FFXIVClientStructs.FFXIV.Component.GUI;
 using ImGuiNET;
-using Lumina.Excel.GeneratedSheets;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using System.Runtime.InteropServices;
 using XIVSlothCombo.Attributes;
 using XIVSlothCombo.Combos;
 using XIVSlothCombo.Combos.PvE;
 using XIVSlothCombo.Core;
-using XIVSlothCombo.CustomComboNS.Functions;
-using XIVSlothCombo.Services;
 using XIVSlothCombo.Window.Tabs;
 
 namespace XIVSlothCombo.Window
@@ -101,95 +94,89 @@ namespace XIVSlothCombo.Window
 
             var topLeftSideHeight = region.Y;
 
-            using (var style = ImRaii.PushStyle(ImGuiStyleVar.CellPadding, new Vector2(4, 0)))
+            using var style = ImRaii.PushStyle(ImGuiStyleVar.CellPadding, new Vector2(4, 0));
+            using var table = ImRaii.Table("###MainTable", 2, ImGuiTableFlags.Resizable);
+            if (!table)
+                return;
+
+
+            ImGui.TableSetupColumn("##LeftColumn", ImGuiTableColumnFlags.WidthFixed, ImGui.GetWindowWidth() / 3);
+
+            ImGui.TableNextColumn();
+
+            var regionSize = ImGui.GetContentRegionAvail();
+
+            ImGui.PushStyleVar(ImGuiStyleVar.SelectableTextAlign, new Vector2(0.5f, 0.5f));
+
+            using (var leftChild = ImRaii.Child($"###SlothLeftSide", regionSize with { Y = topLeftSideHeight }, false, ImGuiWindowFlags.NoDecoration))
             {
-                using (var table = ImRaii.Table("###MainTable", 2, ImGuiTableFlags.Resizable))
+                if (ThreadLoadImageHandler.TryGetTextureWrap(@"https://github.com/Taurenkey/XIVSlothCombo/blob/main/res/plugin/xivslothcombo.png?raw=true", out var logo))
                 {
-                    if (!table)
-                        return;
-
-
-                    ImGui.TableSetupColumn("##LeftColumn", ImGuiTableColumnFlags.WidthFixed, ImGui.GetWindowWidth() / 3);
-
-                    ImGui.TableNextColumn();
-
-                    var regionSize = ImGui.GetContentRegionAvail();
-
-                    ImGui.PushStyleVar(ImGuiStyleVar.SelectableTextAlign, new Vector2(0.5f, 0.5f));
-
-                    using (var leftChild = ImRaii.Child($"###SlothLeftSide", regionSize with { Y = topLeftSideHeight }, false, ImGuiWindowFlags.NoDecoration))
+                    ImGuiEx.LineCentered("###SlothLogo", () =>
                     {
-                        if (ThreadLoadImageHandler.TryGetTextureWrap(@"https://github.com/Taurenkey/XIVSlothCombo/blob/main/res/plugin/xivslothcombo.png?raw=true", out var logo))
-                        {
-                            ImGuiEx.LineCentered("###SlothLogo", () =>
-                            {
-                                ImGui.Image(logo.ImGuiHandle, new(125f.Scale(), 125f.Scale()));
-                            });
+                        ImGui.Image(logo.ImGuiHandle, new(125f.Scale(), 125f.Scale()));
+                    });
 
-                        }
-                        ImGui.Spacing();
-                        ImGui.Separator();
+                }
+                ImGui.Spacing();
+                ImGui.Separator();
 
-                        if (ImGui.Selectable("PvE Features", OpenWindow == OpenWindow.PvE))
-                        {
-                            OpenWindow = OpenWindow.PvE;
-                        }
-                        if (ImGui.Selectable("PvP Features", OpenWindow == OpenWindow.PvP))
-                        {
-                            OpenWindow = OpenWindow.PvP;
-                        }
-                        ImGui.Spacing();
-                        if (ImGui.Selectable("Misc. Settings", OpenWindow == OpenWindow.Settings))
-                        {
-                            OpenWindow = OpenWindow.Settings;
-                        }
-                        ImGui.Spacing();
-                        if (ImGui.Selectable("About", OpenWindow == OpenWindow.About))
-                        {
-                            OpenWindow = OpenWindow.About;
-                        }
+                if (ImGui.Selectable("PvE Features", OpenWindow == OpenWindow.PvE))
+                {
+                    OpenWindow = OpenWindow.PvE;
+                }
+                if (ImGui.Selectable("PvP Features", OpenWindow == OpenWindow.PvP))
+                {
+                    OpenWindow = OpenWindow.PvP;
+                }
+                ImGui.Spacing();
+                if (ImGui.Selectable("Misc. Settings", OpenWindow == OpenWindow.Settings))
+                {
+                    OpenWindow = OpenWindow.Settings;
+                }
+                ImGui.Spacing();
+                if (ImGui.Selectable("About", OpenWindow == OpenWindow.About))
+                {
+                    OpenWindow = OpenWindow.About;
+                }
 
 #if DEBUG
-                        ImGui.Spacing();
-                        if (ImGui.Selectable("DEBUG", OpenWindow == OpenWindow.Debug))
-                        {
-                            OpenWindow = OpenWindow.Debug;
-                        }
-                        ImGui.Spacing();
+                ImGui.Spacing();
+                if (ImGui.Selectable("DEBUG", OpenWindow == OpenWindow.Debug))
+                {
+                    OpenWindow = OpenWindow.Debug;
+                }
+                ImGui.Spacing();
 #endif
 
-                    }
-
-                    ImGui.PopStyleVar();
-                    ImGui.TableNextColumn();
-                    using (var rightChild = ImRaii.Child($"###SlothRightSide", Vector2.Zero, false))
-                    {
-                        switch (OpenWindow)
-                        {
-                            case OpenWindow.PvE:
-                                PvEFeatures.Draw();
-                                break;
-                            case OpenWindow.PvP:
-                                PvPFeatures.Draw();
-                                break;
-                            case OpenWindow.Settings:
-                                Settings.Draw();
-                                break;
-                            case OpenWindow.About:
-                                P.AboutUs.Draw();
-                                break;
-                            case OpenWindow.Debug:
-                                Debug.Draw();
-                                break;
-                            default:
-                                break;
-                        };
-                    }
-                }
             }
+
+            ImGui.PopStyleVar();
+            ImGui.TableNextColumn();
+            using var rightChild = ImRaii.Child($"###SlothRightSide", Vector2.Zero, false);
+            switch (OpenWindow)
+            {
+                case OpenWindow.PvE:
+                    PvEFeatures.Draw();
+                    break;
+                case OpenWindow.PvP:
+                    PvPFeatures.Draw();
+                    break;
+                case OpenWindow.Settings:
+                    Settings.Draw();
+                    break;
+                case OpenWindow.About:
+                    P.AboutUs.Draw();
+                    break;
+                case OpenWindow.Debug:
+                    Debug.Draw();
+                    break;
+                default:
+                    break;
+            };
         }
 
-       
+
 
         public void Dispose()
         {

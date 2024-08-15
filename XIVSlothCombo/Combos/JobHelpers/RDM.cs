@@ -1,9 +1,15 @@
-﻿using XIVSlothCombo.Combos.PvE;
+﻿using Dalamud.Game.ClientState.JobGauge.Types;
+using ECommons.DalamudServices;
+using System;
+using System.Net.Quic;
+using XIVSlothCombo.Combos.JobHelpers.Enums;
+using XIVSlothCombo.Combos.PvE;
 using XIVSlothCombo.CustomComboNS.Functions;
+using XIVSlothCombo.Data;
 
 namespace XIVSlothCombo.Combos.JobHelpers
 {
-    internal class RDM
+    internal class RDMHelper : RDM
     {
         static bool HasEffect(ushort id) => CustomComboFunctions.HasEffect(id);
         static float GetBuffRemainingTime(ushort effectid) => CustomComboFunctions.GetBuffRemainingTime(effectid);
@@ -14,17 +20,35 @@ namespace XIVSlothCombo.Combos.JobHelpers
         static bool ActionReady(uint id) => CustomComboFunctions.ActionReady(id);
         static bool CanSpellWeave(uint id) => CustomComboFunctions.CanSpellWeave(id);
         static bool HasCharges(uint id) => CustomComboFunctions.HasCharges(id);
+        static bool TraitLevelChecked(uint id) => CustomComboFunctions.TraitLevelChecked(id);
+        static byte GetBuffStacks(ushort id) => CustomComboFunctions.GetBuffStacks(id);
 
-        internal class ManaBalancer : PvE.RDM
+        internal class RDMMana
         {
-            internal bool useFire;
-            internal bool useStone;
-            internal bool useThunder;
-            internal bool useAero;
-            internal bool useThunder2;
-            internal bool useAero2;
+            private static RDMGauge Gauge => CustomComboFunctions.GetJobGauge<RDMGauge>();
+            internal static int ManaStacks => Gauge.ManaStacks;
+            internal static int Black => AdjustMana(Gauge.BlackMana);
+            internal static int White => AdjustMana(Gauge.WhiteMana);
+            internal static int Min => AdjustMana(Math.Min(Gauge.BlackMana, Gauge.WhiteMana));
+            internal static int Max => AdjustMana(Math.Max(Gauge.BlackMana, Gauge.WhiteMana));
+            private static int AdjustMana(byte mana)
+            {
+                if (LevelChecked(Manafication))
+                {
+                    byte magickedSword = GetBuffStacks(Buffs.MagickedSwordPlay);
+                    byte magickedSwordMana = magickedSword switch
+                    {
+                        3 => 50,
+                        2 => 30,
+                        1 => 15,
+                        _ => 0
+                    };
+                    return mana + magickedSwordMana;
+                }
+                else return mana;
+            }
 
-            internal void CheckBalance()
+            public static (bool useFire, bool useStone, bool useThunder, bool useAero, bool useThunder2, bool useAero2) CheckBalance()
             {
                 //SYSTEM_MANA_BALANCING_MACHINE
                 //Machine to decide which ver spell should be used.
@@ -40,15 +64,15 @@ namespace XIVSlothCombo.Combos.JobHelpers
                 //   - Resolution adds 4/4 mana
                 //2.Stay within difference limit [DONE]
                 //3.Strive to achieve correct mana for double melee combo burst [DONE]
-                int blackmana = Gauge.BlackMana;
-                int whitemana = Gauge.WhiteMana;
+                int blackmana = Black;
+                int whitemana = White;
                 //Reset outputs
-                useFire = false;
-                useStone = false;
-                useThunder = false;
-                useAero = false;
-                useThunder2 = false;
-                useAero2 = false;
+                bool useFire = false;
+                bool useStone = false;
+                bool useThunder = false;
+                bool useAero = false;
+                bool useThunder2 = false;
+                bool useAero2 = false;
 
                 //ST
                 if (LevelChecked(Verthunder)
@@ -84,23 +108,25 @@ namespace XIVSlothCombo.Combos.JobHelpers
                     else useAero2 = true;
                 }
                 //END_SYSTEM_MANA_BALANCING_MACHINE
+
+                return (useFire, useStone, useThunder, useAero, useThunder2, useAero2);
             }
         }
 
-        internal class MeleeFinisher : PvE.RDM
-        { 
+        internal class MeleeFinisher
+        {
             internal static bool CanUse(in uint lastComboMove, out uint actionID)
             {
-                int blackmana = Gauge.BlackMana;
-                int whitemana = Gauge.WhiteMana;
+                int blackmana = RDMMana.Black;
+                int whitemana = RDMMana.White;
 
-                if (Gauge.ManaStacks >= 3)
+                if (RDMMana.ManaStacks >= 3)
                 {
                     if (blackmana >= whitemana && LevelChecked(Verholy))
                     {
                         if ((!HasEffect(Buffs.Embolden) || GetBuffRemainingTime(Buffs.Embolden) < 10)
                             && !HasEffect(Buffs.VerfireReady)
-                            && (HasEffect(Buffs.VerstoneReady) && GetBuffRemainingTime(Buffs.VerstoneReady) >= 10)
+                            && HasEffect(Buffs.VerstoneReady) && GetBuffRemainingTime(Buffs.VerstoneReady) >= 10
                             && (blackmana - whitemana <= 18))
                         {
                             actionID = Verflare;
@@ -112,7 +138,7 @@ namespace XIVSlothCombo.Combos.JobHelpers
                     else if (LevelChecked(Verflare))
                     {
                         if ((!HasEffect(Buffs.Embolden) || GetBuffRemainingTime(Buffs.Embolden) < 10)
-                            && (HasEffect(Buffs.VerfireReady) && GetBuffRemainingTime(Buffs.VerfireReady) >= 10)
+                            && HasEffect(Buffs.VerfireReady) && GetBuffRemainingTime(Buffs.VerfireReady) >= 10
                             && !HasEffect(Buffs.VerstoneReady)
                             && LevelChecked(Verholy)
                             && (whitemana - blackmana <= 18))
@@ -143,17 +169,19 @@ namespace XIVSlothCombo.Combos.JobHelpers
             }
         }
 
-        internal class OGCDHelper : PvE.RDM
+        internal class OGCDHelper
         {
             internal static bool CanUse(in uint actionID, in bool SingleTarget, out uint newActionID)
             {
                 var distance = CustomComboFunctions.GetTargetDistance();
-                
+
                 uint placeOGCD = 0;
 
                 bool fleche = SingleTarget ? Config.RDM_ST_oGCD_Fleche : Config.RDM_AoE_oGCD_Fleche;
                 bool contra = SingleTarget ? Config.RDM_ST_oGCD_ContraSixte : Config.RDM_AoE_oGCD_ContraSixte;
                 bool engagement = SingleTarget ? Config.RDM_ST_oGCD_Engagement : Config.RDM_AoE_oGCD_Engagement;
+                bool vice = SingleTarget ? Config.RDM_ST_oGCD_ViceOfThorns : Config.RDM_AoE_oGCD_ViceOfThorns;
+                bool prefulg = SingleTarget ? Config.RDM_ST_oGCD_Prefulgence : Config.RDM_AoE_oGCD_Prefulgence;
                 int engagementPool = (SingleTarget && Config.RDM_ST_oGCD_Engagement_Pooling) || (!SingleTarget && Config.RDM_AoE_oGCD_Engagement_Pooling) ? 1 : 0;
 
                 bool corpacorps = SingleTarget ? Config.RDM_ST_oGCD_CorpACorps : Config.RDM_AoE_oGCD_CorpACorps;
@@ -175,11 +203,22 @@ namespace XIVSlothCombo.Combos.JobHelpers
                     && LevelChecked(Corpsacorps)
                     && distance <= corpacorpsRange)
                     placeOGCD = Corpsacorps;
+
                 if (contra
                     && ActionReady(ContreSixte))
                     placeOGCD = ContreSixte;
                 if (fleche && ActionReady(Fleche))
                     placeOGCD = Fleche;
+
+                if (vice &&
+                    TraitLevelChecked(Traits.EnhancedEmbolden) &&
+                    HasEffect(Buffs.ThornedFlourish))
+                    placeOGCD = ViceOfThorns;
+
+                if (prefulg &&
+                    TraitLevelChecked(Traits.EnhancedManaficationIII) &&
+                    HasEffect(Buffs.PrefulugenceReady))
+                    placeOGCD = Prefulgence;
 
                 if (CanSpellWeave(actionID) && placeOGCD != 0)
                 {
@@ -216,18 +255,281 @@ namespace XIVSlothCombo.Combos.JobHelpers
             }
         }
 
-        internal class RDMLucid : PvE.RDM
+        internal class RDMLucid
         {
             internal static bool SafetoUse(in uint lastComboMove)
             {
                 return
-                    !CustomComboFunctions.HasEffect(Buffs.Dualcast)
+                    !HasEffect(Buffs.Dualcast)
                     && lastComboMove != EnchantedRiposte
                     && lastComboMove != EnchantedZwerchhau
                     && lastComboMove != EnchantedRedoublement
                     && lastComboMove != Verflare
                     && lastComboMove != Verholy
                     && lastComboMove != Scorch; // Change abilities to Lucid Dreaming for entire weave window
+            }
+        }
+
+        internal class RDMOpenerLogic
+        {
+            private static bool HasCooldowns()
+            {
+                if (CustomComboFunctions.GetRemainingCharges(Acceleration) < 2)
+                    return false;
+
+                if (CustomComboFunctions.GetRemainingCharges(Corpsacorps) < 2)
+                    return false;
+
+                if (CustomComboFunctions.GetRemainingCharges(Engagement) < 2)
+                    return false;
+
+                if (!CustomComboFunctions.ActionReady(Embolden))
+                    return false;
+
+                if (!CustomComboFunctions.ActionReady(Manafication))
+                    return false;
+
+                if (!CustomComboFunctions.ActionReady(Fleche))
+                    return false;
+
+                if (!CustomComboFunctions.ActionReady(ContreSixte))
+                    return false;
+
+                if (!CustomComboFunctions.ActionReady(All.Swiftcast))
+                    return false;
+
+                return true;
+            }
+
+            private static uint OpenerLevel => 100;
+
+            public uint PrePullStep = 0;
+
+            public uint OpenerStep = 0;
+
+            public static bool LevelChecked => CustomComboFunctions.LocalPlayer.Level >= OpenerLevel;
+
+            private static bool CanOpener => HasCooldowns() && LevelChecked;
+
+            private OpenerState currentState = OpenerState.PrePull;
+
+            public OpenerState CurrentState
+            {
+                get
+                {
+                    return currentState;
+                }
+                set
+                {
+                    if (value != currentState)
+                    {
+                        if (value == OpenerState.PrePull)
+                        {
+                            Svc.Log.Debug($"Entered PrePull Opener");
+                        }
+                        if (value == OpenerState.InOpener) OpenerStep = 1;
+                        if (value == OpenerState.OpenerFinished || value == OpenerState.FailedOpener)
+                        {
+                            if (value == OpenerState.FailedOpener)
+                                Svc.Log.Information($"Opener Failed at step {OpenerStep}");
+
+                            ResetOpener();
+                        }
+                        if (value == OpenerState.OpenerFinished) Svc.Log.Information("Opener Finished");
+
+                        currentState = value;
+                    }
+                }
+            }
+
+            private bool DoPrePullSteps(ref uint actionID)
+            {
+                if (!LevelChecked)
+                    return false;
+
+                if (CanOpener && PrePullStep == 0)
+                {
+                    PrePullStep = 1;
+                }
+
+                if (!HasCooldowns())
+                {
+                    PrePullStep = 0;
+                }
+
+                if (CurrentState == OpenerState.PrePull && PrePullStep > 0)
+                {
+                    if (CustomComboFunctions.LocalPlayer.CastActionId == Veraero3 && PrePullStep == 1) CurrentState = OpenerState.InOpener;
+                    else if (PrePullStep == 1) actionID = Veraero3;
+
+                    if (ActionWatching.CombatActions.Count > 2 && CustomComboFunctions.InCombat())
+                        CurrentState = OpenerState.FailedOpener;
+
+                    return true;
+                }
+                PrePullStep = 0;
+                return false;
+            }
+
+            private bool DoOpener(ref uint actionID)
+            {
+                if (!LevelChecked)
+                    return false;
+
+                if (currentState == OpenerState.InOpener)
+                {
+                    if (CustomComboFunctions.WasLastAction(Verthunder3) && OpenerStep == 1) OpenerStep++;
+                    else if (OpenerStep == 1) actionID = Verthunder3;
+
+                    if (CustomComboFunctions.WasLastAction(All.Swiftcast) && OpenerStep == 2) OpenerStep++;
+                    else if (OpenerStep == 2) actionID = All.Swiftcast;
+
+                    if (CustomComboFunctions.WasLastAction(Verthunder3) && OpenerStep == 3) OpenerStep++;
+                    else if (OpenerStep == 3) actionID = Verthunder3;
+
+                    if (CustomComboFunctions.WasLastAction(Fleche) && OpenerStep == 4) OpenerStep++;
+                    else if (OpenerStep == 4) actionID = Fleche;
+
+                    if (CustomComboFunctions.WasLastAction(Acceleration) && OpenerStep == 5) OpenerStep++;
+                    else if (OpenerStep == 5) actionID = Acceleration;
+
+                    if (CustomComboFunctions.WasLastAction(Verthunder3) && OpenerStep == 6) OpenerStep++;
+                    else if (OpenerStep == 6) actionID = Verthunder3;
+
+                    if (CustomComboFunctions.WasLastAction(Embolden) && OpenerStep == 7) OpenerStep++;
+                    else if (OpenerStep == 7) actionID = Embolden;
+
+                    if (CustomComboFunctions.WasLastAction(Manafication) && OpenerStep == 8) OpenerStep++;
+                    else if (OpenerStep == 8) actionID = Manafication;
+
+                    if (CustomComboFunctions.WasLastAction(EnchantedRiposte) && OpenerStep == 9) OpenerStep++;
+                    else if (OpenerStep == 9) actionID = EnchantedRiposte;
+
+                    if (CustomComboFunctions.WasLastAction(ContreSixte) && OpenerStep == 10) OpenerStep++;
+                    else if (OpenerStep == 10) actionID = ContreSixte;
+
+                    if (CustomComboFunctions.WasLastAction(EnchantedZwerchhau) && OpenerStep == 11) OpenerStep++;
+                    else if (OpenerStep == 11) actionID = EnchantedZwerchhau;
+
+                    if (CustomComboFunctions.WasLastAction(Engagement) && OpenerStep == 12) OpenerStep++;
+                    else if (OpenerStep == 12) actionID = Engagement;
+
+                    if (CustomComboFunctions.WasLastAction(EnchantedRedoublement) && OpenerStep == 13) OpenerStep++;
+                    else if (OpenerStep == 13) actionID = EnchantedRedoublement;
+
+                    if (CustomComboFunctions.WasLastAction(Corpsacorps) && OpenerStep == 14) OpenerStep++;
+                    else if (OpenerStep == 14) actionID = Corpsacorps;
+
+                    if (CustomComboFunctions.WasLastAction(Verholy) && OpenerStep == 15) OpenerStep++;
+                    else if (OpenerStep == 15) actionID = Verholy;
+
+                    if (CustomComboFunctions.WasLastAction(ViceOfThorns) && OpenerStep == 16) OpenerStep++;
+                    else if (OpenerStep == 16) actionID = ViceOfThorns;
+
+                    if (CustomComboFunctions.WasLastAction(Scorch) && OpenerStep == 17) OpenerStep++;
+                    else if (OpenerStep == 17) actionID = Scorch;
+
+                    if (CustomComboFunctions.WasLastAction(Engagement) && OpenerStep == 18) OpenerStep++;
+                    else if (OpenerStep == 18) actionID = Engagement;
+
+                    if (CustomComboFunctions.WasLastAction(Corpsacorps) && OpenerStep == 19) OpenerStep++;
+                    else if (OpenerStep == 19) actionID = Corpsacorps;
+
+                    if (CustomComboFunctions.WasLastAction(Resolution) && OpenerStep == 20) OpenerStep++;
+                    else if (OpenerStep == 20) actionID = Resolution;
+
+                    if (CustomComboFunctions.WasLastAction(Prefulgence) && OpenerStep == 21) OpenerStep++;
+                    else if (OpenerStep == 21) actionID = Prefulgence;
+
+                    if (CustomComboFunctions.WasLastAction(GrandImpact) && OpenerStep == 22) OpenerStep++;
+                    else if (OpenerStep == 22) actionID = GrandImpact;
+
+                    if (CustomComboFunctions.WasLastAction(Acceleration) && OpenerStep == 23) OpenerStep++;
+                    else if (OpenerStep == 23) actionID = Acceleration;
+
+                    if (CustomComboFunctions.WasLastAction(Verfire) && OpenerStep == 24) OpenerStep++;
+                    else if (OpenerStep == 24) actionID = Verfire;
+
+                    if (CustomComboFunctions.WasLastAction(GrandImpact) && OpenerStep == 25) OpenerStep++;
+                    else if (OpenerStep == 25) actionID = GrandImpact;
+
+                    if (CustomComboFunctions.WasLastAction(Verthunder3) && OpenerStep == 26) OpenerStep++;
+                    else if (OpenerStep == 26) actionID = Verthunder3;
+
+                    if (CustomComboFunctions.WasLastAction(Fleche) && OpenerStep == 27) OpenerStep++;
+                    else if (OpenerStep == 27) actionID = Fleche;
+
+                    if (CustomComboFunctions.WasLastAction(Veraero3) && OpenerStep == 28) OpenerStep++;
+                    else if (OpenerStep == 28) actionID = Veraero3;
+
+                    if (CustomComboFunctions.WasLastAction(Verfire) && OpenerStep == 29) OpenerStep++;
+                    else if (OpenerStep == 29) actionID = Verfire;
+
+                    if (CustomComboFunctions.WasLastAction(Verthunder3) && OpenerStep == 30) OpenerStep++;
+                    else if (OpenerStep == 30) actionID = Verthunder3;
+
+                    if (CustomComboFunctions.WasLastAction(Verstone) && OpenerStep == 31) OpenerStep++;
+                    else if (OpenerStep == 31) actionID = Verstone;
+
+                    if (CustomComboFunctions.WasLastAction(Veraero3) && OpenerStep == 32) OpenerStep++;
+                    else if (OpenerStep == 32) actionID = Veraero3;
+
+                    if (CustomComboFunctions.WasLastAction(All.Swiftcast) && OpenerStep == 33) OpenerStep++;
+                    else if (OpenerStep == 33) actionID = All.Swiftcast;
+
+                    if (CustomComboFunctions.WasLastAction(Veraero3) && OpenerStep == 34) OpenerStep++;
+                    else if (OpenerStep == 34) actionID = Veraero3;
+
+                    if (CustomComboFunctions.WasLastAction(ContreSixte) && OpenerStep == 35) CurrentState = OpenerState.OpenerFinished;
+                    else if (OpenerStep == 35) actionID = ContreSixte;
+
+                    if (ActionWatching.TimeSinceLastAction.TotalSeconds >= 5)
+                        CurrentState = OpenerState.FailedOpener;
+
+                    if (((actionID == Embolden && CustomComboFunctions.IsOnCooldown(Embolden)) ||
+                        (actionID == Manafication && CustomComboFunctions.IsOnCooldown(Manafication)) ||
+                        (actionID == Fleche && CustomComboFunctions.IsOnCooldown(Fleche)) ||
+                        (actionID == ContreSixte && CustomComboFunctions.IsOnCooldown(ContreSixte)) ||
+                        (actionID == All.Swiftcast && CustomComboFunctions.IsOnCooldown(All.Swiftcast)) ||
+                        (actionID == Acceleration && CustomComboFunctions.GetRemainingCharges(Acceleration) < 2) ||
+                        (actionID == Corpsacorps && CustomComboFunctions.GetRemainingCharges(Corpsacorps) < 2) ||
+                        (actionID == Engagement && CustomComboFunctions.GetRemainingCharges(Engagement) < 2)) && ActionWatching.TimeSinceLastAction.TotalSeconds >= 3)
+                    {
+                        CurrentState = OpenerState.FailedOpener;
+                        return false;
+                    }
+                    return true;
+                }
+                return false;
+            }
+
+            private void ResetOpener()
+            {
+                PrePullStep = 0;
+                OpenerStep = 0;
+            }
+
+            public bool DoFullOpener(ref uint actionID)
+            {
+                if (!LevelChecked)
+                    return false;
+
+                if (CurrentState == OpenerState.PrePull)
+                    if (DoPrePullSteps(ref actionID))
+                        return true;
+
+                if (CurrentState == OpenerState.InOpener)
+                {
+                    if (DoOpener(ref actionID))
+                        return true;
+                }
+
+                if (!CustomComboFunctions.InCombat())
+                {
+                    ResetOpener();
+                    CurrentState = OpenerState.PrePull;
+                }
+                return false;
             }
         }
     }
